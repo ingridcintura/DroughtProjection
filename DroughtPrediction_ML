@@ -1,0 +1,111 @@
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.callbacks import EarlyStopping
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+import matplotlib.pyplot as plt
+from scipy.stats import pearsonr
+
+# Load the data
+data_path = 'C:/Users/icintura/OneDrive - Iowa State University/1. Assistant Research/SW_Deficit/Iowa_HistoricalData/PRISM_USDM_v1_normalized.csv'
+df = pd.read_csv(data_path)
+# Filter Time Window
+df = df[(df['Year'] >= 2012) & (df['Year'] <= 2019)]
+
+# Check for existing columns 'Year' and 'Month'
+if 'Year' not in df.columns or 'Month' not in df.columns:
+    raise ValueError("The dataset must include 'Year' and 'Month' columns.")
+
+# Sorting data by HUC8, Year, and Month
+df = df.sort_values(by=['HUC8', 'Year', 'Month'])
+
+# Creating lag features
+df['PPT_lag1'] = df.groupby('HUC8')['PPT'].shift(1)
+df['TMAX_lag1'] = df.groupby('HUC8')['TMAX'].shift(1)
+df['PPT_lag2'] = df.groupby('HUC8')['PPT'].shift(2)
+df['TMAX_lag2'] = df.groupby('HUC8')['TMAX'].shift(2)
+df['PPT_lag3'] = df.groupby('HUC8')['PPT'].shift(3)
+df['TMAX_lag3'] = df.groupby('HUC8')['TMAX'].shift(3)
+
+# Adding features with a 6-month window
+df['PPT_mean6'] = df.groupby('HUC8')['PPT'].rolling(window=6).mean().reset_index(level=0, drop=True)
+df['TMAX_mean6'] = df.groupby('HUC8')['TMAX'].rolling(window=6).mean().reset_index(level=0, drop=True)
+df['PPT_var6'] = df.groupby('HUC8')['PPT'].rolling(window=6).var().reset_index(level=0, drop=True)
+df['TMAX_var6'] = df.groupby('HUC8')['TMAX'].rolling(window=6).var().reset_index(level=0, drop=True)
+
+# Adding features with a 9-month window
+df['PPT_mean9'] = df.groupby('HUC8')['PPT'].rolling(window=9).mean().reset_index(level=0, drop=True)
+df['TMAX_mean9'] = df.groupby('HUC8')['TMAX'].rolling(window=9).mean().reset_index(level=0, drop=True)
+df['PPT_var9'] = df.groupby('HUC8')['PPT'].rolling(window=9).var().reset_index(level=0, drop=True)
+df['TMAX_var9'] = df.groupby('HUC8')['TMAX'].rolling(window=9).var().reset_index(level=0, drop=True)
+
+# Adding seasonal and cyclical features
+df['Month_sin'] = np.sin(2 * np.pi * df['Month'] / 12)
+df['Month_cos'] = np.cos(2 * np.pi * df['Month'] / 12)
+df['Year_sin'] = np.sin(2 * np.pi * df['Year'] / 365)
+df['Year_cos'] = np.cos(2 * np.pi * df['Year'] / 365)
+
+# Drop rows with missing values in lagged and rolling features
+df = df.dropna(subset=['PPT_lag1', 'TMAX_lag1', 'PPT_lag2', 'TMAX_lag2', 'PPT_lag3', 'TMAX_lag3',
+                       'PPT_mean6', 'TMAX_mean6', 'PPT_var6', 'TMAX_var6',
+                       'PPT_mean9', 'TMAX_mean9', 'PPT_var9', 'TMAX_var9',
+                       'Month_sin', 'Month_cos', 'Year_sin', 'Year_cos'])
+
+# Define features and target variable
+features = ['PPT', 'TMAX', 'PPT_lag1', 'TMAX_lag1', 'PPT_lag2', 'TMAX_lag2', 'PPT_lag3', 'TMAX_lag3',
+             'PPT_mean6', 'TMAX_mean6', 'PPT_var6', 'TMAX_var6',
+             'PPT_mean9', 'TMAX_mean9', 'PPT_var9', 'TMAX_var9',
+             'Month_sin', 'Month_cos', 'Year_sin', 'Year_cos']
+
+X = df[features]
+y = df['USDM']
+
+# Standardize the features
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# Reshape data for LSTM (samples, time steps, features)
+X_scaled = X_scaled.reshape((X_scaled.shape[0], 1, X_scaled.shape[1]))
+
+# Split the data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+
+# Build LSTM model
+model = Sequential()
+model.add(LSTM(units=64, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
+model.add(Dropout(0.3))
+model.add(LSTM(units=32, return_sequences=False))
+model.add(Dropout(0.3))
+model.add(Dense(16, activation='relu'))
+model.add(Dense(1))
+
+# Compile the model
+model.compile(optimizer='adam', loss='mean_squared_error')
+
+# Implement early stopping with patience
+early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+
+# Train the model
+history = model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.1, callbacks=[early_stopping], verbose=1)
+
+# Make predictions
+y_pred = model.predict(X_test)
+
+# Evaluate the model
+mse = mean_squared_error(y_test, y_pred)
+rmse = np.sqrt(mse)
+mae = mean_absolute_error(y_test, y_pred)
+r2 = r2_score(y_test, y_pred)
+pearson_corr, _ = pearsonr(y_test, y_pred.flatten())
+
+print(f"Mean Squared Error (MSE): {mse}")
+print(f"Root Mean Squared Error (RMSE): {rmse}")
+print(f"Mean Absolute Error (MAE): {mae}")
+print(f"R² Score: {r2}")
+print(f"Pearson Correlation (R): {pearson_corr}")
+
+#Save the model
+model.save('C:/Users/icintura/OneDrive - Iowa State University/1. Assistant Research/SW_Deficit/Model_IC5.keras')
