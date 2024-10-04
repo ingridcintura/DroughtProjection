@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import pearsonr
 
 # Load the data
-data_path = 'C:/Users/icintura/OneDrive - Iowa State University/1. Assistant Research/SW_Deficit/Iowa_HistoricalData/PRISM_USDM_v1_normalized.csv'
+data_path = 'PRISM_USDM_v1_normalized.csv'
 df = pd.read_csv(data_path)
 # Filter Time Window
 df = df[(df['Year'] >= 2012) & (df['Year'] <= 2019)]
@@ -108,4 +108,4 @@ print(f"R² Score: {r2}")
 print(f"Pearson Correlation (R): {pearson_corr}")
 
 #Save the model
-model.save('C:/Users/icintura/OneDrive - Iowa State University/1. Assistant Research/SW_Deficit/Model_IC5.keras')
+model.save('Model_IC5.keras')
